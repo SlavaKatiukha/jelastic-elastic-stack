@@ -1,0 +1,73 @@
+type: install
+name: Elastic Stack
+id: elastic-stack
+
+nodes:     
+  - image: docker.elastic.co/kibana/kibana:7.12.1
+    cloudlets: 16
+    nodeGroup: cp
+    displayName: Kibana
+    startServiceOnCreation: false
+      
+  - image: docker.elastic.co/elasticsearch/elasticsearch:7.12.1
+    cloudlets: 8
+    nodeGroup: es
+    displayName: Elasticsearch
+    volumes:
+      - /usr/share/elasticsearch/data
+    startServiceOnCreation: false
+    env:
+      JELASTIC_PORTS: 9200
+      ES_JAVA_OPTS: '-Xms512m -Xmx512m'
+
+globals:
+  esConfigPath: /usr/share/elasticsearch/config/elasticsearch.yml
+  kibanaConfigPath: /usr/share/kibana/config/kibana.yml
+  
+onInstall:
+  - setupElasticSearch
+  - setupKibana
+  
+actions:
+  setupElasticSearch:
+    - set:
+        config: |        
+          node.name: es01
+          cluster.name: elasticsearch-es01
+          cluster.initial_master_nodes: [ es01 ]
+          network.host: ${nodes.es.address}
+
+    - cmd [es]: echo '${this.config}' > ${globals.esConfigPath}
+
+    - env.control.ExecDockerRunCmd[${nodes.es.join(id,)}]
+
+    - cmd [es]: |-
+        firewall-cmd --permanent --add-port=9200/tcp
+        firewall-cmd --permanent --add-port=9300/tcp
+        firewall-cmd --reload     
+        
+    - env.file.AddFavorite [es]:
+        path: /usr/share/elasticsearch
+
+  setupKibana:
+    - set:
+        config: |        
+          server.name: kibana
+          server.host: "0"
+          server.port: 80
+          elasticsearch.hosts: [ "http://${nodes.es.master.address}:9200" ]
+          monitoring.ui.container.elasticsearch.enabled: true
+
+    - cmd [cp]: echo '${this.config}' > ${globals.kibanaConfigPath}
+
+    - cmd [cp]: |-
+        setcap cap_net_bind_service=+epi /usr/share/kibana/bin/kibana
+        setcap cap_net_bind_service=+epi /usr/share/kibana/bin/kibana-plugin
+        setcap cap_net_bind_service=+epi /usr/share/kibana/bin/kibana-keystore
+        setcap cap_net_bind_service=+epi /usr/share/kibana/node/bin/node
+        
+    - env.control.ExecDockerRunCmd[${nodes.cp.join(id,)}]
+    
+    - env.file.AddFavorite [cp]:
+        path: /usr/share/kibana
+        
